@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The suite validates what this package emits against the published schema,
+  # and reads it from the spec repo rather than from a copy vendored here — a
+  # copy is a second place for the format to drift, and a stale one lets the
+  # gate pass against a format that has moved on. Locally those tests skip when
+  # the spec repo is not checked out beside this one; here it always is, so the
+  # gate is never quietly absent.
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: coffeejson-swift
+      - uses: actions/checkout@v4
+        with:
+          repository: coffeejson-org/coffeejson
+          # Pinned, so a commit here is green or red on its own merits: against
+          # an unpinned spec, every upstream schema commit re-judges this repo
+          # and no commit is reproducibly anything. Bump it deliberately, in a
+          # commit that also carries whatever the new schema asks of this code.
+          ref: ec2033aa4031914614eb7d62129b38d8b3149df5
+          path: coffeejson
+      - run: swift build
+        working-directory: coffeejson-swift
+      - run: swift test
+        working-directory: coffeejson-swift
+
+  # A field the schema declares and this package does not name is skipped
+  # silently on decode: the document imports, the value is gone, and no test in
+  # this repo can fail on it, because no test can fail on a field nobody wrote.
+  # So the check runs here rather than from anyone's memory.
+  #
+  # It needs the schema, and the schema is not vendored: a copy would go stale
+  # and this check would then pass against a format that had moved on. The spec
+  # repo is public, so CI reads it there, at a pinned commit.
+  schema-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: coffeejson-swift
+      - uses: actions/checkout@v4
+        with:
+          repository: coffeejson-org/coffeejson
+          ref: ec2033aa4031914614eb7d62129b38d8b3149df5   # the same pin the test job reads; bump both together
+          path: coffeejson
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: node coffeejson-swift/scripts/check-schema-coverage.mjs "$GITHUB_WORKSPACE/coffeejson"
